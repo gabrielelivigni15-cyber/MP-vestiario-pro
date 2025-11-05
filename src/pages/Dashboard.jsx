@@ -1,195 +1,155 @@
-import React, { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
-import { Button } from '../components/ui/button'
-import { exportToExcel } from '../lib/exportExcel'
+import React, { useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { FileSpreadsheet, Lightbulb, Users, PackageSearch, RotateCcw } from "lucide-react";
+import { saveAs } from "file-saver";
+import * as XLSX from "xlsx";
 
-export default function Dashboard({goTo}) {
-  const [kpi, setKpi] = useState({ articoli:0, persone:0, low:0, valore:0 })
-  const [top, setTop] = useState([])
-  const [byTipo, setByTipo] = useState([])
-  const [rowsLow, setRowsLow] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  async function load() {
-    setLoading(true)
-
-    const { count: aCount } = await supabase.from('articoli').select('*', { count:'exact', head:true })
-    const { count: pCount } = await supabase.from('personale').select('*', { count:'exact', head:true })
-
-    const { data: lowData } = await supabase
-      .from('articoli')
-      .select('id, nome, fornitore, quantita, prezzo_unitario')
-      .lte('quantita', 5)
-    setRowsLow(lowData || [])
-
-    const { data: valData } = await supabase
-      .from('articoli')
-      .select('quantita, prezzo_unitario')
-    const valore = (valData||[]).reduce((s, r) => s + (Number(r.quantita||0) * Number(r.prezzo_unitario||0)), 0)
-
-    const { data: ass } = await supabase.from('assegnazioni').select('id_articolo, articolo:articoli(nome)')
-    const cnt = {}
-    ;(ass||[]).forEach(r => {
-      cnt[r.id_articolo] = (cnt[r.id_articolo] || 0) + 1
-    })
-    const top5 = Object.entries(cnt)
-      .map(([id, qty]) => ({
-        id,
-        qty,
-        nome: (ass||[]).find(x => x.id_articolo == id)?.articolo?.nome || '—'
-      }))
-      .sort((a, b) => b.qty - a.qty)
-      .slice(0, 5)
-
-    const { data: rows } = await supabase.from('articoli').select('tipo, quantita')
-    const perTipo = {}
-    ;(rows||[]).forEach(r => {
-      perTipo[r.tipo||'Altro'] = (perTipo[r.tipo||'Altro']||0) + (r.quantita||0)
-    })
-    const byTipoArr = Object.entries(perTipo).map(([tipo, q]) => ({ tipo, q }))
-
-    setKpi({
-      articoli: aCount||0,
-      persone: pCount||0,
-      low: (lowData||[]).length,
-      valore: Number(valore.toFixed(2))
-    })
-    setTop(top5)
-    setByTipo(byTipoArr)
-    setLoading(false)
-  }
+export default function Dashboard() {
+  const [articoli, setArticoli] = useState([]);
+  const [personale, setPersonale] = useState([]);
+  const [assegnazioni, setAssegnazioni] = useState([]);
 
   useEffect(() => {
-    load()
-    const t = setInterval(load, 10000)
-    return () => clearInterval(t)
-  }, [])
+    fetchData();
+  }, []);
 
-  async function exportInventario() {
-    const { data } = await supabase
-      .from('articoli')
-      .select('id, nome, tipo, taglia, quantita, prezzo_unitario, fornitore, codice_fornitore, foto_url')
-    exportToExcel('inventario-vestiario', data||[])
+  async function fetchData() {
+    const { data: art } = await supabase.from("articoli").select("*");
+    const { data: pers } = await supabase.from("personale").select("*");
+    const { data: assegn } = await supabase.from("assegnazioni").select("*");
+    setArticoli(art || []);
+    setPersonale(pers || []);
+    setAssegnazioni(assegn || []);
   }
 
-  function Bars({ data, labelKey='tipo', valueKey='q' }) {
-    const max = Math.max(1, ...data.map(d => d[valueKey]))
-    return (
-      <div style={{display:'grid', gap:8}}>
-        {data.map((d, i) => (
-          <div key={i} style={{display:'grid', gridTemplateColumns:'160px 1fr 60px', gap:8, alignItems:'center'}}>
-            <div className="small" title={d[labelKey]} style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{d[labelKey]}</div>
-            <div style={{height:10, background:'#f0f2f6', borderRadius:999}}>
-              <div style={{height:'100%', width:`${(d[valueKey]/max)*100}%`, background:'#C00000', borderRadius:999}}/>
-            </div>
-            <div className="small" style={{textAlign:'right'}}>{d[valueKey]}</div>
-          </div>
-        ))}
-      </div>
-    )
-  }
+  const quantitaPerTipo = articoli.reduce((acc, a) => {
+    acc[a.tipo] = (acc[a.tipo] || 0) + a.quantita;
+    return acc;
+  }, {});
+
+  const chartData = Object.keys(quantitaPerTipo).map((key) => ({
+    tipo: key,
+    quantita: quantitaPerTipo[key],
+  }));
+
+  const assegnazioniCount = assegnazioni.reduce((acc, a) => {
+    acc[a.nome_capo] = (acc[a.nome_capo] || 0) + 1;
+    return acc;
+  }, {});
+
+  const pieData = Object.keys(assegnazioniCount).map((key) => ({
+    name: key,
+    value: assegnazioniCount[key],
+  }));
+
+  const colori = ["#b30e0e", "#e83c3c", "#8b8b8b", "#ff6961", "#9d0d0d"];
+
+  const articoliTotali = articoli.length;
+  const personaleTotale = personale.length;
+  const scorteCritiche = articoli.filter((a) => a.quantita <= 5).length;
+  const valoreTotale = articoli.reduce((acc, a) => acc + (a.valore || 0) * a.quantita, 0);
+
+  const handleDownload = () => {
+    const ws = XLSX.utils.json_to_sheet(articoli);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+    const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
+    saveAs(blob, "inventario_medipower.xlsx");
+  };
 
   return (
-    <div className="grid" style={{gap:18}}>
-      {/* KPI principali */}
-      <div className="grid grid-3">
-        <section className="card kpi">
-          <div className="label">Articoli totali</div>
-          <div className="value">{loading ? '…' : kpi.articoli}</div>
-          <span className="small">Tutte le tipologie presenti</span>
-        </section>
-
-        <section className="card kpi">
-          <div className="label">Personale</div>
-          <div className="value">{loading ? '…' : kpi.persone}</div>
-          <span className="small">Dipendenti censiti</span>
-        </section>
-
-        <section className="card kpi">
-          <div className="label">Da riordinare</div>
-          <div className="value" style={{color:'#C00000'}}>{loading ? '…' : kpi.low}</div>
-          <span className="small">Scorta ≤ 5</span>
-        </section>
+    <div className="min-h-screen bg-[#f8f9fa] text-gray-800 font-sans">
+      <div className="flex justify-between items-center p-4 border-b bg-white shadow-sm">
+        <img src="/medipower-logo.png" alt="Medipower Logo" className="h-10" />
+        <h1 className="text-xl font-semibold text-[#b30e0e]">
+          MP Vestiario Pro <span className="text-gray-500 text-sm">— powered by Medipower</span>
+        </h1>
+        <span className="text-sm text-[#b30e0e] font-bold bg-[#ffe6e6] px-3 py-1 rounded-full shadow-sm">
+          Live Dashboard
+        </span>
       </div>
 
-      {/* Grafici sintetici */}
-      <section className="card grid grid-2">
-        <div>
-          <h3 style={{marginTop:0}}>Quantità per tipo</h3>
-          <Bars data={byTipo}/>
+      <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card title="Articoli totali" value={articoliTotali} icon={<PackageSearch />} desc="Tutte le tipologie presenti" />
+        <Card title="Personale" value={personaleTotale} icon={<Users />} desc="Dipendenti censiti" />
+        <Card title="Da riordinare" value={scorteCritiche} icon={<RotateCcw />} desc="Scorta ≤ 5" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6">
+        <div className="bg-white rounded-xl shadow-md p-4">
+          <h2 className="text-lg font-semibold mb-4 text-[#b30e0e]">📊 Quantità per tipo</h2>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={chartData}>
+              <XAxis dataKey="tipo" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="quantita" fill="#b30e0e" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
-        <div>
-          <h3 style={{marginTop:0}}>Più assegnati</h3>
-          <Bars data={top.map(t => ({ tipo:t.nome, q:t.qty }))}/>
+
+        <div className="bg-white rounded-xl shadow-md p-4">
+          <h2 className="text-lg font-semibold mb-4 text-[#b30e0e]">🥧 Capi più assegnati</h2>
+          <ResponsiveContainer width="100%" height={250}>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={100} label>
+                {pieData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={colori[index % colori.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
-      </section>
+      </div>
 
-      {/* Valore totale e azioni */}
-      <section className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <div>
-          <div className="label">Valore totale magazzino</div>
-          <div className="value">
-            € {loading ? '…' : kpi.valore.toLocaleString('it-IT', {minimumFractionDigits:2})}
-          </div>
+      <div className="mt-8 px-6 text-center">
+        <p className="text-lg font-semibold mb-2">
+          💰 Valore totale magazzino:{" "}
+          <span className="text-[#b30e0e]">€ {valoreTotale.toLocaleString("it-IT")}</span>
+        </p>
+        <button
+          onClick={handleDownload}
+          className="bg-[#b30e0e] hover:bg-[#8b0c0c] text-white font-semibold px-6 py-2 rounded-lg shadow-md transition-all"
+        >
+          <FileSpreadsheet className="inline-block w-4 h-4 mr-2" />
+          Scarica inventario Excel
+        </button>
+      </div>
+
+      <div className="mt-10 px-6 pb-10">
+        <div className="bg-white rounded-xl shadow-md p-5">
+          <h2 className="text-lg font-semibold mb-2 flex items-center gap-2 text-[#b30e0e]">
+            <Lightbulb /> Suggerimenti automatici
+          </h2>
+          {scorteCritiche > 0 ? (
+            <p className="text-[#b30e0e] font-medium">
+              ⚠️ Alcuni articoli sono sotto scorta. Valuta un riordino immediato.
+            </p>
+          ) : (
+            <p className="text-green-600 font-medium">
+              ✅ Tutto sotto controllo. Nessun articolo sotto scorta.
+            </p>
+          )}
         </div>
-        <div style={{display:'flex', gap:10}}>
-          <Button onClick={exportInventario}>Scarica inventario Excel</Button>
-          <Button variant="ghost" onClick={()=>goTo('Articoli')}>Gestisci articoli</Button>
-          <Button variant="ghost" onClick={()=>goTo('Personale')}>Gestisci personale</Button>
-          <Button variant="ghost" onClick={()=>goTo('Assegna')}>Assegna</Button>
-          <Button variant="ghost" onClick={()=>goTo('Storico')}>Storico</Button>
-        </div>
-      </section>
+      </div>
 
-      {/* Avviso sotto scorta */}
-      {kpi.low>0 && (
-        <div className="notice">
-          ⚠️ {kpi.low} articoli sotto scorta. Valuta un riordino.
-        </div>
-      )}
-
-      {/* 🔥 Suggerimenti automatici */}
-      <section className="card">
-        <h3 style={{marginTop:0}}>💡 Suggerimenti automatici</h3>
-        <p style={{color:'#6b7280', marginTop:0}}>Analisi automatica basata sulle scorte attuali</p>
-
-        {loading && <div>Analisi in corso...</div>}
-
-        {!loading && kpi.low === 0 && (
-          <div style={{color:'#16a34a', fontWeight:'700'}}>
-            ✅ Tutto sotto controllo. Nessun articolo sotto scorta.
-          </div>
-        )}
-
-        {!loading && kpi.low > 0 && (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Articolo</th>
-                <th>Fornitore</th>
-                <th>Q.tà attuale</th>
-                <th>Da riordinare</th>
-                <th>Valore stimato (€)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rowsLow.map((a, i) => {
-                const daRiordinare = 20 - a.quantita
-                const valore = (daRiordinare * (a.prezzo_unitario || 0)).toFixed(2)
-                return (
-                  <tr key={i}>
-                    <td>{a.nome}</td>
-                    <td>{a.fornitore || '—'}</td>
-                    <td>{a.quantita}</td>
-                    <td>{daRiordinare > 0 ? daRiordinare : 0}</td>
-                    <td>{valore}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <footer className="text-center text-sm text-gray-500 pb-4">
+        MP Vestiario © {new Date().getFullYear()} — by Medipower
+      </footer>
     </div>
-  )
+  );
+}
+
+function Card({ title, value, icon, desc }) {
+  return (
+    <div className="bg-white rounded-xl shadow-md p-6 flex flex-col items-center justify-center text-center">
+      <div className="text-[#b30e0e] mb-2">{icon}</div>
+      <h3 className="text-lg font-semibold">{title}</h3>
+      <p className="text-3xl font-bold text-[#b30e0e]">{value}</p>
+      <p className="text-sm text-gray-500">{desc}</p>
+    </div>
+  );
 }
