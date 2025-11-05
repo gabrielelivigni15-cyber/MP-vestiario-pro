@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { supabase } from "../supabaseClient";
+import { supabase } from "import { supabase } from "../lib/supabaseClient";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { FileSpreadsheet, Lightbulb, Users, PackageSearch, RotateCcw } from "lucide-react";
 import { saveAs } from "file-saver";
