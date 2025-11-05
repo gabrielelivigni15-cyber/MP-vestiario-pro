@@ -87,5 +87,46 @@ export default function Dashboard({goTo}){
 
       {kpi.low>0 && (<div className="notice">⚠️ {kpi.low} articoli sotto scorta. Valuta un riordino.</div>)}
     </div>
+    {/* 🔥 Sezione consigli intelligenti */}
+<section className="card">
+  <h3 style={{marginTop:0}}>💡 Suggerimenti automatici</h3>
+  <p style={{color:'#6b7280', marginTop:0}}>Analisi automatica basata sulle scorte attuali</p>
+
+  {loading && <div>Analisi in corso...</div>}
+
+  {!loading && kpi.low === 0 && (
+    <div style={{color:'#16a34a', fontWeight:'700'}}>✅ Tutto sotto controllo. Nessun articolo sotto scorta.</div>
+  )}
+
+  {!loading && kpi.low > 0 && (
+    <table className="table">
+      <thead>
+        <tr>
+          <th>Articolo</th>
+          <th>Fornitore</th>
+          <th>Q.tà attuale</th>
+          <th>Da riordinare</th>
+          <th>Valore stimato (€)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rowsLow?.map((a,i) => {
+          const daRiordinare = 20 - a.quantita
+          const valore = (daRiordinare * (a.prezzo_unitario || 0)).toFixed(2)
+          return (
+            <tr key={i}>
+              <td>{a.nome}</td>
+              <td>{a.fornitore || '—'}</td>
+              <td>{a.quantita}</td>
+              <td>{daRiordinare > 0 ? daRiordinare : 0}</td>
+              <td>{valore}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )}
+</section>
+
   )
 }
